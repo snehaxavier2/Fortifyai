@@ -1,0 +1,42 @@
+project:
+  name: fortifyai_preprocessing
+  random_seed: 42
+
+paths:
+  raw_dataset: /mnt/fortifyai/raw/ffpp
+  processed_dataset: /mnt/fortifyai/processed/ffpp
+  splits: /mnt/fortifyai/splits
+  logs: /mnt/fortifyai/logs
+
+dataset:
+  compression_level: c23
+  real_path: original_sequences/youtube/c23/videos
+  fake_paths:
+    - manipulated_sequences/Deepfakes/c23/videos
+    - manipulated_sequences/Face2Face/c23/videos
+    - manipulated_sequences/FaceSwap/c23/videos
+    - manipulated_sequences/NeuralTextures/c23/videos
+
+splitting:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+sampling:
+  frames_per_video: 20
+  recovery_range: 5
+
+image:
+  input_size: 224
+
+face_detection:
+  model: retinaface
+  confidence_threshold: 0.8
+
+system:
+  num_workers: 2
+  device: cpu
+
+logging:
+  save_metadata: true
+  save_summary: true
