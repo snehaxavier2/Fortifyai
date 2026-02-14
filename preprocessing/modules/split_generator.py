@@ -4,103 +4,182 @@ import random
 import yaml
 from pathlib import Path
 
+# Load Configuration
 
 def load_config(config_path):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
+# Collect Real Videos
 
-def collect_videos(raw_root, real_path, fake_paths):
-    real_videos = []
-    fake_videos = []
-
-    # Collect real videos
+def collect_real_videos(raw_root, real_path):
     real_dir = Path(raw_root) / real_path
-    for file in real_dir.glob("*.mp4"):
-        real_videos.append(str(file.relative_to(raw_root)))
 
-    # Collect fake videos from all manipulation folders
-    for fake_subpath in fake_paths:
-        fake_dir = Path(raw_root) / fake_subpath
-        for file in fake_dir.glob("*.mp4"):
-            fake_videos.append(str(file.relative_to(raw_root)))
+    if not real_dir.exists():
+        raise FileNotFoundError(f"Real path not found: {real_dir}")
 
-    return real_videos, fake_videos
+    videos = list(real_dir.glob("*.mp4"))
+    return [str(v.relative_to(raw_root)) for v in videos]
 
+# Collect Fake Videos Per Type
 
-def stratified_split(real_videos, fake_videos, train_ratio, val_ratio, seed):
+def collect_fake_videos_by_type(raw_root, manipulated_root, compression_level):
+    manipulated_dir = Path(raw_root) / manipulated_root
+
+    if not manipulated_dir.exists():
+        raise FileNotFoundError(f"Manipulated root not found: {manipulated_dir}")
+
+    fake_dict = {}
+
+    for manipulation_type in manipulated_dir.iterdir():
+        if manipulation_type.is_dir():
+            video_dir = manipulation_type / compression_level / "videos"
+            if video_dir.exists():
+                videos = list(video_dir.glob("*.mp4"))
+                if len(videos) > 0:
+                    fake_dict[manipulation_type.name] = [
+                        str(v.relative_to(raw_root)) for v in videos
+                    ]
+
+    if len(fake_dict) == 0:
+        raise ValueError("No fake manipulation folders detected.")
+
+    return fake_dict
+
+# Balanced Fake Sampling
+
+def balanced_fake_sampling(fake_dict, total_fake, seed):
     random.seed(seed)
 
-    random.shuffle(real_videos)
-    random.shuffle(fake_videos)
+    manipulation_types = list(fake_dict.keys())
+    num_types = len(manipulation_types)
 
-    def split_list(video_list):
-        n = len(video_list)
+    videos_per_type = total_fake // num_types
+    remainder = total_fake % num_types
+
+    balanced_fakes = []
+
+    for idx, m_type in enumerate(manipulation_types):
+        videos = fake_dict[m_type]
+
+        if len(videos) < videos_per_type:
+            raise ValueError(
+                f"Not enough videos in {m_type}. "
+                f"Required: {videos_per_type}, Available: {len(videos)}"
+            )
+
+        random.shuffle(videos)
+
+        count = videos_per_type + (1 if idx < remainder else 0)
+        selected = videos[:count]
+
+        balanced_fakes.extend(selected)
+
+    if len(balanced_fakes) != total_fake:
+        raise ValueError("Balanced fake sampling failed. Incorrect total count.")
+
+    return balanced_fakes
+
+# Stratified Split
+
+def stratified_split(real_list, fake_list, train_ratio, val_ratio, seed):
+    random.seed(seed)
+
+    random.shuffle(real_list)
+    random.shuffle(fake_list)
+
+    def split_class(data):
+        n = len(data)
         train_end = int(train_ratio * n)
         val_end = train_end + int(val_ratio * n)
 
-        train = video_list[:train_end]
-        val = video_list[train_end:val_end]
-        test = video_list[val_end:]
+        train = data[:train_end]
+        val = data[train_end:val_end]
+        test = data[val_end:]
         return train, val, test
 
-    r_train, r_val, r_test = split_list(real_videos)
-    f_train, f_val, f_test = split_list(fake_videos)
+    r_train, r_val, r_test = split_class(real_list)
+    f_train, f_val, f_test = split_class(fake_list)
 
-    train_set = [(v, 0) for v in r_train] + [(v, 1) for v in f_train]
-    val_set = [(v, 0) for v in r_val] + [(v, 1) for v in f_val]
-    test_set = [(v, 0) for v in r_test] + [(v, 1) for v in f_test]
+    train = [(v, 0) for v in r_train] + [(v, 1) for v in f_train]
+    val = [(v, 0) for v in r_val] + [(v, 1) for v in f_val]
+    test = [(v, 0) for v in r_test] + [(v, 1) for v in f_test]
 
-    random.shuffle(train_set)
-    random.shuffle(val_set)
-    random.shuffle(test_set)
+    random.shuffle(train)
+    random.shuffle(val)
+    random.shuffle(test)
 
-    return train_set, val_set, test_set
+    return train, val, test
 
+# Save CSV
 
-def save_split(split_data, output_path):
-    os.makedirs(output_path.parent, exist_ok=True)
+def save_split(data, output_path):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["video_path", "label"])
-        writer.writerows(split_data)
+        writer.writerows(data)
 
+# Main Execution
 
 def main():
     config_path = Path(__file__).resolve().parent.parent / "config.yaml"
     config = load_config(config_path)
 
-    raw_root = Path(config["paths"]["raw_dataset"])
+    raw_root = config["paths"]["raw_dataset"]
     splits_root = Path(config["paths"]["splits"])
 
     real_path = config["dataset"]["real_path"]
-    fake_paths = config["dataset"]["fake_paths"]
+    manipulated_root = config["dataset"]["manipulated_root"]
+    compression_level = config["dataset"]["compression_level"]
+
+    total_real = config["dataset"]["total_real_videos"]
+    total_fake = config["dataset"]["total_fake_videos"]
 
     train_ratio = config["splitting"]["train_ratio"]
     val_ratio = config["splitting"]["val_ratio"]
+
     seed = config["project"]["random_seed"]
 
-    print("Collecting videos...")
-    real_videos, fake_videos = collect_videos(raw_root, real_path, fake_paths)
+    print("Collecting real videos...")
+    real_videos = collect_real_videos(raw_root, real_path)
 
-    print(f"Total real videos: {len(real_videos)}")
-    print(f"Total fake videos: {len(fake_videos)}")
+    if len(real_videos) < total_real:
+        raise ValueError(
+            f"Not enough real videos. Required: {total_real}, Available: {len(real_videos)}"
+        )
+
+    random.seed(seed)
+    random.shuffle(real_videos)
+    real_videos = real_videos[:total_real]
+
+    print(f"Selected real videos: {len(real_videos)}")
+
+    print("Collecting fake videos by manipulation type...")
+    fake_dict = collect_fake_videos_by_type(raw_root, manipulated_root, compression_level)
+
+    for k, v in fake_dict.items():
+        print(f"{k}: {len(v)} videos")
+
+    print("Performing balanced fake sampling...")
+    fake_videos = balanced_fake_sampling(fake_dict, total_fake, seed)
+    print(f"Selected fake videos: {len(fake_videos)}")
 
     print("Performing stratified split...")
     train_set, val_set, test_set = stratified_split(
         real_videos, fake_videos, train_ratio, val_ratio, seed
     )
 
-    print(f"Train size: {len(train_set)}")
-    print(f"Val size: {len(val_set)}")
-    print(f"Test size: {len(test_set)}")
+    print(f"Train: {len(train_set)}")
+    print(f"Val: {len(val_set)}")
+    print(f"Test: {len(test_set)}")
 
     save_split(train_set, splits_root / "train.csv")
     save_split(val_set, splits_root / "val.csv")
     save_split(test_set, splits_root / "test.csv")
 
-    print("Splits saved successfully.")
+    print("Split generation completed successfully.")
 
 
 if __name__ == "__main__":
