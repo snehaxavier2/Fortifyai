@@ -3,19 +3,20 @@ project:
   random_seed: 42
 
 paths:
-  raw_dataset: /mnt/fortifyai/raw/ffpp
-  processed_dataset: /mnt/fortifyai/processed/ffpp
-  splits: /mnt/fortifyai/splits
-  logs: /mnt/fortifyai/logs
+  raw_dataset: E:/Datasets/FaceForensicsPP
+  processed_dataset: E:/Datasets/FFPP_Processed
+  splits: E:/Datasets/FFPP_Splits
+  logs: E:/Datasets/FFPP_Logs
 
 dataset:
   compression_level: c23
   real_path: original_sequences/youtube/c23/videos
-  fake_paths:
-    - manipulated_sequences/Deepfakes/c23/videos
-    - manipulated_sequences/Face2Face/c23/videos
-    - manipulated_sequences/FaceSwap/c23/videos
-    - manipulated_sequences/NeuralTextures/c23/videos
+  manipulated_root: manipulated_sequences
+
+  # Dataset policy
+  total_real_videos: 1000
+  total_fake_videos: 1000
+  equal_fake_sampling: true
 
 splitting:
   train_ratio: 0.7
