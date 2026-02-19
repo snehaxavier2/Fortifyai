@@ -26,6 +26,7 @@ splitting:
 sampling:
   frames_per_video: 20
   recovery_range: 5
+  min_valid_frames: 15
 
 image:
   input_size: 224

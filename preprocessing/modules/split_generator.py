@@ -168,12 +168,20 @@ def main():
 
     print("Performing stratified split...")
     train_set, val_set, test_set = stratified_split(
-        real_videos, fake_videos, train_ratio, val_ratio, seed
-    )
+    real_videos, fake_videos, train_ratio, val_ratio, seed
+)
 
-    print(f"Train: {len(train_set)}")
-    print(f"Val: {len(val_set)}")
-    print(f"Test: {len(test_set)}")
+    def simple_balance_check(data, name):
+        real = sum(1 for _, label in data if label == 0)
+        fake = sum(1 for _, label in data if label == 1)
+        print(f"{name} -> Real: {real}, Fake: {fake}")
+        if real != fake:
+            raise ValueError(f"Class imbalance detected in {name} split.")
+
+    simple_balance_check(train_set, "Train")
+    simple_balance_check(val_set, "Validation")
+    simple_balance_check(test_set, "Test")
+
 
     save_split(train_set, splits_root / "train.csv")
     save_split(val_set, splits_root / "val.csv")
