@@ -11,8 +11,8 @@ class Trainer:
         train_loader,
         val_loader,
         device,
-        stage1_epochs=3,
-        total_epochs=15,
+        stage1_epochs=5,
+        total_epochs=20,
         checkpoint_dir="checkpoints",
     ):
         self.model = model
@@ -30,7 +30,7 @@ class Trainer:
 
         self.best_f1 = 0.0
 
-        # Freeze backbone initially (Stage 1)
+        # Freeze backbone initially
         for param in self.model.spatial_features.parameters():
             param.requires_grad = False
 

@@ -44,8 +44,8 @@ def main():
         train_loader=train_loader,
         val_loader=val_loader,
         device=device,
-        stage1_epochs=3,
-        total_epochs=15,
+        stage1_epochs=5,
+        total_epochs=20,
         checkpoint_dir="checkpoints"
     )
 
