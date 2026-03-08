@@ -9,7 +9,6 @@ from preprocessing.config import (
     FRAMES_PER_CLASS, IMAGE_SIZE
 )
 
-
 # Reproducibility
 random.seed(SEED)
 np.random.seed(SEED)

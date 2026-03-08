@@ -202,7 +202,7 @@ def _run_epoch(epoch, model, train_loader, val_loader,
     scheduler.step()
     avg_loss = total_loss / len(train_loader)
 
-    # ── Validation with full metrics ──────────────────────────────────────
+    # Validation with full metrics 
     val = _evaluate(model, val_loader, device)
     f1  = val["f1"]
     auc = val["auc"]
