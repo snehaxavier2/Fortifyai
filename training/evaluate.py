@@ -1,177 +1,165 @@
-import torch # type: ignore
+import os
+import sys
+import argparse
 import numpy as np # type: ignore
+import torch # type: ignore
 from torch.utils.data import DataLoader # type: ignore
-from sklearn.metrics import ( # type: ignore
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    roc_auc_score,
-    roc_curve
-)
-import matplotlib.pyplot as plt # type: ignore
-import seaborn as sns # type: ignore
+from torch.amp import autocast # type: ignore
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix # type: ignore
 
-from training.dataset import FFPPDataset
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from models.hybrid_model import HybridModel
+from training.dataset import SingleDomainDataset
+from preprocessing.config import DEVICE, OUTPUT_FFPP, OUTPUT_CELEB, OUTPUT_GAN
+
+DOMAIN_CONFIG = [
+    ("FF++",     OUTPUT_FFPP),
+    ("Celeb-DF", OUTPUT_CELEB),
+    ("GAN",      OUTPUT_GAN),
+]
 
 
-def load_model(checkpoint_path: str, device: torch.device) -> torch.nn.Module:
-    model = HybridModel(pretrained=False)
-    state_dict = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(state_dict)
-    model.to(device)
+def evaluate_domain(model, domain_name, root_dir, device, split="test", batch_size=24):
+    dataset = SingleDomainDataset(root_dir, split, domain_name)
+    loader  = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     model.eval()
-    return model
-
-
-def evaluate_model(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    threshold: float = None
-):
-    all_labels = []
-    all_predictions = []
-    all_probabilities = []
+    all_preds, all_probs, all_labels = [], [], []
 
     with torch.no_grad():
-        for batch in loader:
-            rgb = batch["rgb"].to(device)
-            fft = batch["fft"].to(device)
-            labels = batch["label"].to(device)
+        for images, labels in loader:
+            images = images.to(device)
+            with autocast("cuda", enabled=device.type == "cuda"):
+                logits_orig = model(images)
+                logits_flip = model(torch.flip(images, dims=[3]))
+                probs_orig = torch.sigmoid(logits_orig)
+                probs_flip = torch.sigmoid(logits_flip)
+                probs = ((probs_orig + probs_flip) / 2).squeeze(1)
+            threshold = 0.26
+            preds = (probs > threshold).float()
+            all_probs.extend(probs.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.numpy())
 
-            outputs = model(rgb, fft).squeeze(1)
-            probabilities = torch.sigmoid(outputs)
-
-            all_labels.extend(labels.cpu().numpy())
-            all_probabilities.extend(probabilities.cpu().numpy())
-
-    y_true = np.array(all_labels)
-    y_prob = np.array(all_probabilities)
-
-    if threshold is not None:
-        y_pred = (y_prob > threshold).astype(float)
-        return y_true, y_pred, y_prob
-    return y_true, y_prob
-
-
-def compute_metrics(y_true, y_pred, y_prob):
-    metrics = {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "precision": precision_score(y_true, y_pred),
-        "recall": recall_score(y_true, y_pred),
-        "f1": f1_score(y_true, y_pred),
-        "confusion_matrix": confusion_matrix(y_true, y_pred),
-        "roc_auc": roc_auc_score(y_true, y_prob)
+    all_labels = np.array(all_labels)
+    all_preds  = np.array(all_preds)
+    all_probs  = np.array(all_probs)
+    acc  = accuracy_score(all_labels, all_preds)
+    prec = precision_score(all_labels, all_preds, average="macro", zero_division=0)
+    rec  = recall_score(all_labels, all_preds, average="macro", zero_division=0)
+    f1   = f1_score(all_labels, all_preds, average="macro", zero_division=0)
+    try:
+        auc = roc_auc_score(all_labels, all_probs)
+    except ValueError:
+        auc = 0.0
+    cm = confusion_matrix(all_labels, all_preds)
+    tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
+    return {
+        "domain":    domain_name,
+        "total":     len(all_labels),
+        "accuracy":  acc,
+        "precision": prec,
+        "recall":    rec,
+        "f1":        f1,
+        "auc":       auc,
+        "tn": int(tn), "fp": int(fp),
+        "fn": int(fn), "tp": int(tp),
+        "probs":    all_probs,
+        "labels":   all_labels
     }
-    return metrics
 
 
-def find_best_threshold(model, val_loader, device):
-    y_true, y_prob = evaluate_model(model, val_loader, device, threshold=None)
-
-    best_threshold = 0.5
-    best_f1 = 0.0
-
-    thresholds = np.arange(0.1, 0.9, 0.01)
-
-    for t in thresholds:
-        y_pred = (y_prob > t).astype(float)
-        f1 = f1_score(y_true, y_pred)
-
-        if f1 > best_f1:
-            best_f1 = f1
-            best_threshold = t
-
-    return best_threshold, best_f1
+def print_domain_result(r):
+    print(f"\n  {'─'*50}")
+    print(f"  Domain     : {r['domain']}")
+    print(f"  Total      : {r['total']} (Real: {r['tn']+r['fp']} | Fake: {r['fn']+r['tp']})")
+    print(f"  Accuracy   : {r['accuracy']:.4f}  ({r['accuracy']*100:.1f}%)")
+    print(f"  Precision  : {r['precision']:.4f}")
+    print(f"  Recall     : {r['recall']:.4f}")
+    print(f"  F1 (macro) : {r['f1']:.4f}")
+    print(f"  AUC-ROC    : {r['auc']:.4f}")
+    print(f"  Confusion  : TP={r['tp']} TN={r['tn']} FP={r['fp']} FN={r['fn']}")
 
 
-def plot_confusion_matrix(cm):
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=["Real", "Fake"],
-        yticklabels=["Real", "Fake"]
-    )
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    plt.title("Confusion Matrix")
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_roc_curve(y_true, y_prob):
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-
-    plt.figure(figsize=(6, 5))
-    plt.plot(fpr, tpr)
-    plt.plot([0, 1], [0, 1], linestyle="--")
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve")
-    plt.tight_layout()
-    plt.show()
+def print_summary(results):
+    f1s   = [r["f1"]       for r in results]
+    aucs  = [r["auc"]      for r in results]
+    accs  = [r["accuracy"] for r in results]
+    print(f"\n{'='*60}")
+    print(f" Aggregate Results")
+    print(f"{'='*60}")
+    print(f"  Mean Accuracy : {np.mean(accs):.4f} ({np.mean(accs)*100:.1f}%)")
+    print(f"  Mean F1       : {np.mean(f1s):.4f}")
+    print(f"  Mean AUC      : {np.mean(aucs):.4f}")
+    print(f"\n{'='*60}")
+    print(f" Cross-Domain Gap Analysis")
+    print(f"{'='*60}")
+    for r in results:
+        bar = "█" * int(r["f1"] * 40) + "░" * (40 - int(r["f1"] * 40))
+        print(f"  {r['domain']:<12}: {r['f1']:.4f} |{bar}|")
+    gap = max(f1s) - min(f1s)
+    print(f"\n  F1 Range : {gap:.4f} (max - min)")
+    if gap < 0.05:
+        verdict = "EXCELLENT — model generalizes well across domains"
+    elif gap < 0.10:
+        verdict = "GOOD — minor domain variation, acceptable"
+    elif gap < 0.20:
+        verdict = "WARNING — moderate domain gap, possible shortcut learning"
+    else:
+        verdict = "CRITICAL — severe domain gap, model not generalizing"
+    print(f"  Verdict  : {verdict}\n")
 
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-
-    dataset_root = "E:/Datasets/FFPP_Processed"
-    checkpoint_path = "checkpoints/best_model.pth"
-
-    val_dataset = FFPPDataset(root_dir=dataset_root, split="val")
-    test_dataset = FFPPDataset(root_dir=dataset_root, split="test")
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=16,
-        shuffle=False,
-        num_workers=2,
-        pin_memory=True
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--checkpoint",
+        default=os.path.join(PROJECT_ROOT, "checkpoints", "best_model.pth")
     )
+    parser.add_argument("--split", default="test", choices=["test", "val"])
+    args = parser.parse_args()
+    print("\n" + "=" * 60)
+    print(" FortifyAI v4-Clean — Cross-Domain Evaluation")
+    print("=" * 60)
+    print(f"  Checkpoint : {args.checkpoint}")
+    print(f"  Device     : {DEVICE}")
 
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=16,
-        shuffle=False,
-        num_workers=2,
-        pin_memory=True
-    )
-
-    model = load_model(checkpoint_path, device)
-
-    best_threshold, best_val_f1 = find_best_threshold(model, val_loader, device)
-
-    print(f"Optimal threshold (validation): {best_threshold:.2f}")
-    print(f"Validation F1 at optimal threshold: {best_val_f1:.4f}")
-
-    y_true, y_pred, y_prob = evaluate_model(
-        model,
-        test_loader,
-        device,
-        threshold=best_threshold
-    )
-
-    metrics = compute_metrics(y_true, y_pred, y_prob)
-
-    print("\nTest Set Performance")
-    print(f"Accuracy : {metrics['accuracy']:.4f}")
-    print(f"Precision: {metrics['precision']:.4f}")
-    print(f"Recall   : {metrics['recall']:.4f}")
-    print(f"F1 Score : {metrics['f1']:.4f}")
-    print(f"ROC AUC  : {metrics['roc_auc']:.4f}")
-
-    print("\nConfusion Matrix:")
-    print(metrics["confusion_matrix"])
-
-    plot_confusion_matrix(metrics["confusion_matrix"])
-    plot_roc_curve(y_true, y_prob)
+    if not os.path.exists(args.checkpoint):
+        print(f"\n  ERROR: Checkpoint not found: {args.checkpoint}")
+        sys.exit(1)
+    print("\n  Loading checkpoint...")
+    ckpt  = torch.load(args.checkpoint, map_location=DEVICE)
+    model = HybridModel(pretrained=False).to(DEVICE)
+    model.load_state_dict(ckpt["model_state"])
+    model.eval()
+    print(f"  Checkpoint epoch : {ckpt.get('epoch', 'unknown')}")
+    print(f"  Training best F1 : {ckpt.get('best_f1', 0.0):.4f}")
+    print(f"  Training best AUC: {ckpt.get('best_auc', 0.0):.4f}")
+    print(f"\n{'='*60}")
+    print(f" Per-Domain Evaluation [test split]")
+    print(f"{'='*60}")
+    results = []
+    for domain_name, root_dir in DOMAIN_CONFIG:
+        print(f"\n  Evaluating: {domain_name}...")
+        r = evaluate_domain(model, domain_name, root_dir, DEVICE, split=args.split)
+        print_domain_result(r)
+        results.append(r)
+    print_summary(results)
+    if args.split == "val":
+        if "probs" in results[0] and "labels" in results[0]:
+            all_probs = np.concatenate([r["probs"] for r in results])
+            all_labels = np.concatenate([r["labels"] for r in results])
+        np.save("val_probs.npy", all_probs)
+        np.save("val_labels.npy", all_labels)
+        print("\nSaved validation probabilities:")
+        print("  val_probs.npy")
+        print("  val_labels.npy")
+        print(f"  Total samples saved: {len(all_probs)}")
+    else:
+        print("\nERROR: probabilities not found in results dictionary.")
 
 
 if __name__ == "__main__":

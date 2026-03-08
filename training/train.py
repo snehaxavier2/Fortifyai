@@ -1,56 +1,44 @@
+import os
+import sys
+import time
 import torch # type: ignore
-from torch.utils.data import DataLoader # type: ignore
-from training.dataset import FFPPDataset
-from models.hybrid_model import HybridModel
-from training.trainer import Trainer
+from training.trainer import train
+
+# Project root on path 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 
-def main():
+def log_environment() -> None:
+    print("\n" + "=" * 60)
+    print(" FortifyAI v5 — Deepfake Detection Training")
+    print("=" * 60)
+    print(f"  Python      : {sys.version.split()[0]}")
+    print(f"  PyTorch     : {torch.__version__}")
 
-    # Device Configuration
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    if torch.cuda.is_available():
+        device = torch.cuda.get_device_name(0)
+        vram   = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        print(f"  Device      : CUDA — {device}")
+        print(f"  VRAM        : {vram:.1f} GB")
+    else:
+        print(f"  Device      : CPU (WARNING: training will be very slow)")
+        print(f"  Recommended : CUDA GPU with 6GB+ VRAM")
+    print(f"  Resolution  : 224×224")
+    print(f"  Batch size  : 24 (effective 48 with grad accumulation)")
+    print("=" * 60 + "\n")
 
-    # Dataset Paths
-    dataset_root = "E:/Datasets/FFPP_Processed"
 
-    # Create Datasets
-    train_dataset = FFPPDataset(root_dir=dataset_root, split="train")
-    val_dataset = FFPPDataset(root_dir=dataset_root, split="val")
-
-    # DataLoaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=16,
-        shuffle=True,
-        num_workers=2,
-        pin_memory=True
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=16,
-        shuffle=False,
-        num_workers=2,
-        pin_memory=True
-    )
-
-    # Initialize Model
-    model = HybridModel(pretrained=True).to(device)
-
-    # Initialize Trainer
-    trainer = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        device=device,
-        stage1_epochs=5,
-        total_epochs=20,
-        checkpoint_dir="checkpoints"
-    )
-
-    # Start Training
-    trainer.train()
+def main() -> None:
+    log_environment()
+    start = time.time()
+    train()
+    elapsed = time.time() - start
+    h = int(elapsed // 3600)
+    m = int((elapsed % 3600) // 60)
+    s = int(elapsed % 60)
+    print(f"\n  Total training time: {h:02d}h {m:02d}m {s:02d}s")
 
 
 if __name__ == "__main__":
