@@ -12,15 +12,15 @@ from models.hybrid_model import HybridModel
 from training.dataset import MultiDomainDataset, BalancedDomainSampler
 from preprocessing.config import SEED
 
-# ── Reproducibility ───────────────────────────────────────────────────────────
+# Reproducibility 
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
 torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark     = False
+torch.backends.cudnn.benchmark     = True
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# Configuration 
 CHECKPOINT_DIR   = r"E:\Fortifyai\checkpoints"
 BATCH_SIZE       = 24           
 GRAD_ACCUM_STEPS = 2            
@@ -31,11 +31,11 @@ LR_STAGE1        = 3e-4
 LR_STAGE2        = 5e-5
 WEIGHT_DECAY     = 1e-4         
 LABEL_SMOOTHING  = 0.05
-NUM_WORKERS      = 4
+NUM_WORKERS      = 2
 UNFREEZE_BLOCKS  = 3
 
 
-# ── Evaluation metrics ────────────────────────────────────────────────────────
+# Evaluation metrics
 
 def compute_eer(labels: np.ndarray, probs: np.ndarray) -> float:
     fpr, tpr, thresholds = roc_curve(labels, probs)
@@ -185,7 +185,7 @@ def _run_epoch(epoch, model, train_loader, val_loader,
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True).unsqueeze(1)
 
-        with autocast():
+        with torch.amp.autocast("cuda"):
             logits = model(images)
             loss   = criterion(logits, labels) / grad_accum_steps
 

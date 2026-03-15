@@ -38,7 +38,7 @@ def evaluate_domain(model, domain_name, root_dir, device, split="test", batch_si
                 probs_orig = torch.sigmoid(logits_orig)
                 probs_flip = torch.sigmoid(logits_flip)
                 probs = ((probs_orig + probs_flip) / 2).squeeze(1)
-            threshold = 0.26
+            threshold = 0.5
             preds = (probs > threshold).float()
             all_probs.extend(probs.cpu().numpy())
             all_preds.extend(preds.cpu().numpy())
@@ -119,7 +119,7 @@ def main():
         "--checkpoint",
         default=os.path.join(PROJECT_ROOT, "checkpoints", "best_model.pth")
     )
-    parser.add_argument("--split", default="test", choices=["test", "val"])
+    parser.add_argument("--split", default="test", choices=[ "test","val"])
     args = parser.parse_args()
     print("\n" + "=" * 60)
     print(" FortifyAI v4-Clean — Cross-Domain Evaluation")
@@ -165,4 +165,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-#git test

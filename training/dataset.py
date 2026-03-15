@@ -25,16 +25,13 @@ class SingleDomainDataset(Dataset):
    
     def __init__(self, root_dir: str, split: str, domain_name: str = "domain"):
         assert split in ("train", "val", "test"), f"Invalid split '{split}'."
-
         self.root_dir    = root_dir
         self.split       = split
         self.domain_name = domain_name
         self.is_train    = split == "train"
-
         self.samples:      list = []
         self.real_indices: list = []
         self.fake_indices: list = []
-
         split_dir = os.path.join(root_dir, split)
         self._collect_images(os.path.join(split_dir, "real"), label=0)
         self._collect_images(os.path.join(split_dir, "fake"), label=1)
@@ -107,17 +104,6 @@ class SingleDomainDataset(Dataset):
             print(f"  WARNING [{self.domain_name}][{self.split}]: "
                   f"Class imbalance — diff: {abs(real_count - fake_count)}")
 
-    def _random_jpeg_compression(self, image: Image.Image) -> Image.Image:
-        """
-        JPEG recompression with wider quality range (30-98).
-        Floor lowered from 50 to 30 in v5 — forces model to learn
-        compression-robust features rather than pristine artifact signals.
-        """
-        quality = np.random.randint(30, 98)
-        buffer  = io.BytesIO()
-        image.save(buffer, format="JPEG", quality=quality)
-        buffer.seek(0)
-        return Image.open(buffer).convert("RGB")
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -129,13 +115,10 @@ class SingleDomainDataset(Dataset):
         except Exception as e:
             print(f"  WARNING [{self.domain_name}]: Failed to load {path}: {e}")
             image = Image.fromarray(np.zeros((96, 96, 3), dtype=np.uint8))
-
         if self.is_train:
-            image = self._random_jpeg_compression(image)
             image = self.train_transform(image)
         else:
             image = self.eval_transform(image)
-
         return image, torch.tensor(label, dtype=torch.float32)
 
 
@@ -215,12 +198,7 @@ class MultiDomainDataset(Dataset):
 
 
 class BalancedDomainSampler(Sampler):
-    """
-    Enforces equal domain and class contribution per batch.
-    batch_size=24 for 6GB VRAM at 224×224 (was 48 at 128×128).
-    Use gradient_accumulation_steps=2 in trainer for effective batch=48.
-    """
-
+   
     def __init__(
         self,
         dataset:    MultiDomainDataset,

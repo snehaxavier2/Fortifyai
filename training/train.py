@@ -3,6 +3,8 @@ import sys
 import time
 import torch # type: ignore
 from training.trainer import train
+torch.set_num_threads(2)
+torch.set_num_interop_threads(2)
 
 # Project root on path 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
