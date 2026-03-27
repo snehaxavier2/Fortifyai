@@ -25,7 +25,6 @@ class FrequencyBranch(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, 3, H, W) — ImageNet-normalised RGB
         gray = x.mean(dim=1)                              
         fft  = torch.fft.fft2(gray)                       
         mag  = torch.log(torch.abs(fft) + 1e-8)          

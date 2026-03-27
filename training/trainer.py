@@ -40,7 +40,6 @@ UNFREEZE_BLOCKS  = 3
 def compute_eer(labels: np.ndarray, probs: np.ndarray) -> float:
     fpr, tpr, thresholds = roc_curve(labels, probs)
     fnr = 1 - tpr
-    # Find threshold where |FPR - FNR| is minimised
     idx = np.argmin(np.abs(fpr - fnr))
     eer = (fpr[idx] + fnr[idx]) / 2.0
     return float(eer)
@@ -130,7 +129,7 @@ def _evaluate(model, loader, device, threshold=0.5) -> dict:
     return metrics
 
 
-# ── Data loaders ──────────────────────────────────────────────────────────────
+# Data loaders 
 
 def _make_loader(split: str, batch_size: int) -> DataLoader:
     dataset = MultiDomainDataset(split)
@@ -152,10 +151,10 @@ def _make_loader(split: str, batch_size: int) -> DataLoader:
     )
 
 
-# ── Label smoothing loss ──────────────────────────────────────────────────────
+# Label smoothing loss 
 
 class LabelSmoothBCE(nn.Module):
-    """BCE with label smoothing — works on all PyTorch versions."""
+    """BCE with label smoothing"""
     def __init__(self, smoothing: float = 0.05, pos_weight: float = 1.2):
         super().__init__()
         self.smoothing   = smoothing
@@ -170,7 +169,7 @@ class LabelSmoothBCE(nn.Module):
         )
 
 
-# ── Single epoch ──────────────────────────────────────────────────────────────
+# Single epoch 
 
 def _run_epoch(epoch, model, train_loader, val_loader,
                optimizer, scheduler, criterion, scaler,
@@ -201,8 +200,6 @@ def _run_epoch(epoch, model, train_loader, val_loader,
 
     scheduler.step()
     avg_loss = total_loss / len(train_loader)
-
-    # Validation with full metrics 
     val = _evaluate(model, val_loader, device)
     f1  = val["f1"]
     auc = val["auc"]
@@ -231,7 +228,7 @@ def _run_epoch(epoch, model, train_loader, val_loader,
         "val_fn":     val["fn"],
     })
 
-    # ── Save best checkpoint ──────────────────────────────────────────────
+    # Save best checkpoint 
     if f1 > best_f1 or (f1 == best_f1 and auc > best_auc):
         best_f1  = max(f1, best_f1)
         best_auc = max(auc, best_auc)
@@ -252,7 +249,7 @@ def _run_epoch(epoch, model, train_loader, val_loader,
     return best_f1, best_auc
 
 
-# ── Main training loop ────────────────────────────────────────────────────────
+# Main training loop 
 
 def train():
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -280,9 +277,6 @@ def train():
     history   = []
     best_f1   = 0.0
     best_auc  = 0.0
-
-    # STAGE 1 — Frozen backbone (15 epochs)
-    # Train: FFT branch + SE attention + classifier only
     print(f"\n{'='*60}")
     print(f" STAGE 1 — Frozen backbone ({EPOCHS_STAGE1} epochs)")
     print(f"{'='*60}")
@@ -305,9 +299,7 @@ def train():
             CHECKPOINT_DIR, GRAD_ACCUM_STEPS
         )
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # STAGE 2 — Unfreeze last 3 blocks + head (85 epochs)
-    # ═══════════════════════════════════════════════════════════════════════
+    # STAGE 2 — Unfreeze last 3 blocks + head 
     print(f"\n{'='*60}")
     print(f" STAGE 2 — Unfreeze last {UNFREEZE_BLOCKS} blocks "
           f"({EPOCHS_STAGE2} epochs)")
@@ -328,7 +320,7 @@ def train():
             CHECKPOINT_DIR, GRAD_ACCUM_STEPS
         )
 
-    # ── Save full training history ────────────────────────────────────────
+    # Save full training history 
     history_path = os.path.join(CHECKPOINT_DIR, "training_history_v5.json")
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)

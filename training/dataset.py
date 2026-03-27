@@ -39,7 +39,7 @@ class SingleDomainDataset(Dataset):
         self._shuffle()
         self._log_distribution()
 
-        # ── v5 Train transform — 224×224, stronger augmentation ───────────
+        # Train transform — 224×224, stronger augmentation 
         self.train_transform = transforms.Compose([
             transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
             transforms.RandomHorizontalFlip(p=0.5),
@@ -51,7 +51,7 @@ class SingleDomainDataset(Dataset):
                 hue=0.05
             ),
             transforms.RandomGrayscale(p=0.1),
-            # GaussianBlur simulates video recompression blur — new in v5
+            # GaussianBlur simulates video recompression blur 
             transforms.RandomApply([
                 transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))
             ], p=0.3),
@@ -202,7 +202,7 @@ class BalancedDomainSampler(Sampler):
     def __init__(
         self,
         dataset:    MultiDomainDataset,
-        batch_size: int  = 24,       # v5: 24 (was 48) — 224×224 VRAM constraint
+        batch_size: int  = 24,       
         drop_last:  bool = True
     ):
         super().__init__(dataset)
