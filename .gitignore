@@ -1,5 +1,6 @@
 venv/
 *.pth
+.env
 *.pyc
 __pycache__/
 *.sqlite3
